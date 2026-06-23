@@ -18,6 +18,7 @@ import com.nexomc.nexo.api.NexoItems;
 import com.nexomc.nexo.items.ItemBuilder;
 
 import fr.nocsy.mcpets.MCPets;
+import fr.nocsy.mcpets.compat.CraftEngineCompat;
 import fr.nocsy.mcpets.data.Pet;
 import fr.nocsy.mcpets.data.Items;
 import fr.nocsy.mcpets.PPermission;
@@ -229,6 +230,10 @@ public class PetConfig extends AbstractConfig {
             }
             final String mat = getConfig().getString(path + ".Material");
             final String itemsAdder = getConfig().getString(path + ".ItemsAdder", "");
+            String craftEngineId = getConfig().getString(path + ".CraftEngineId", "");
+            if (craftEngineId.isEmpty()) {
+                craftEngineId = getConfig().getString(path + ".CraftEngine", "");
+            }
             final int data = getConfig().getInt(path + ".CustomModelData");
             final String textureBase = getConfig().getString(path + ".TextureBase64");
             final String itemModel = getConfig().getString(path + ".ItemModel");
@@ -263,34 +268,73 @@ public class PetConfig extends AbstractConfig {
                 if (itemId != null && !itemId.isEmpty()) {
                     final ItemBuilder builder = NexoItems.itemFromId(itemId);
                     if (builder != null) {
-                        itemStack = builder.build();
-                        final ItemMeta meta = itemStack.getItemMeta();
-                        PDCTag.set(meta, localName);
-
-                        if (name != null) {
-                            String iconName = Utils.applyPlaceholders(pet.getOwner(), name);
-                            meta.displayName(Utils.toComponent(iconName));
+                        final ItemStack customItem = prepareExternalItem(
+                                builder.build(), showStats, localName, name, description
+                        );
+                        if (customItem != null) {
+                            return customItem;
                         }
-
-                        if (description != null) {
-                            List<Component> desc = new ArrayList<>();
-
-                            for (String s : description) {
-                                desc.add(Utils.toComponent(Utils.applyPlaceholders(pet.getOwner(), s)));
-                            }
-
-                            meta.lore(desc);
-                        }
-
-                        itemStack.setItemMeta(meta);
-                        if (showStats) itemStack = pet.applyStats(itemStack);
-
-                        return itemStack;
                     }
+                }
+            }
+
+            // CraftEngine integration. The compat bridge supports both the
+            // legacy 0.0.x API and the current 26.x API without linking MCPets
+            // to CraftEngine classes when the plugin is absent.
+            if (MCPets.isCraftEngineLoaded() && !craftEngineId.isEmpty()) {
+                final ItemStack customItem = prepareExternalItem(
+                        CraftEngineCompat.createItem(craftEngineId),
+                        showStats,
+                        localName,
+                        name,
+                        description
+                );
+                if (customItem != null) {
+                    return customItem;
                 }
             }
         }
         return itemStack;
+    }
+
+    /**
+     * Applies MCPets menu metadata to an external item while retaining every
+     * provider-owned component, PDC value, item model and behavior tag.
+     */
+    private ItemStack prepareExternalItem(final ItemStack source,
+                                          final boolean showStats,
+                                          final String localName,
+                                          final String name,
+                                          final List<String> description) {
+        if (source == null) {
+            return null;
+        }
+
+        ItemStack result = source.clone();
+        final ItemMeta meta = result.getItemMeta();
+        if (meta == null) {
+            return null;
+        }
+
+        PDCTag.set(meta, localName);
+        if (name != null) {
+            final String iconName = Utils.applyPlaceholders(pet.getOwner(), name);
+            meta.displayName(Utils.toComponent(iconName));
+        }
+
+        if (description != null) {
+            final List<Component> lore = new ArrayList<>();
+            for (final String line : description) {
+                lore.add(Utils.toComponent(Utils.applyPlaceholders(pet.getOwner(), line)));
+            }
+            meta.lore(lore);
+        }
+
+        result.setItemMeta(meta);
+        if (showStats) {
+            result = pet.applyStats(result);
+        }
+        return result;
     }
 
     private void reloadLevels() {

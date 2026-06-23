@@ -16,56 +16,60 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Entity;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.UUID;
 
 public class BetterModelModeler implements AbstractModeler {
 
     private BetterModelListeners listeners;
 
+    public BetterModelModeler() {
+        // hitBoxes() was added in BetterModel 2.2.0. Verify the minimum API
+        // contract during startup so an outdated installation is rejected and
+        // MCPets can fall back to ModelEngine instead of crashing on first mount.
+        try {
+            EntityTrackerRegistry.class.getMethod("hitBoxes");
+        } catch (final NoSuchMethodException error) {
+            throw new IllegalStateException("BetterModel 2.2.0 or newer is required.", error);
+        }
+    }
+
     /**
      * Finds the first mountable HitBox from the registry's trackers.
      */
     private HitBox findMountableHitBox(EntityTrackerRegistry registry) {
-        for (EntityTracker tracker : registry.trackers()) {
-            for (RenderedBone bone : tracker.bones()) {
-                HitBox hb = bone.getHitBox();
-                if (hb != null && hb.mountController().canMount()) {
-                    return hb;
-                }
-            }
-        }
-        return null;
+        return registry.hitBoxes().stream()
+                .filter(hitBox -> hitBox.mountController().canMount())
+                .findFirst()
+                .orElse(null);
     }
 
     @Override
     public boolean mountDriver(UUID petUUID, Entity rider, String mountType) {
         EntityTrackerRegistry registry = BetterModel.registryOrNull(petUUID);
-
-        if (rider.getVehicle() != null)
-            rider.getVehicle().eject();
-
-        if (registry != null) {
-            HitBox hitBox = findMountableHitBox(registry);
-            if (hitBox != null) {
-                // Configure the mount controller based on mount type
-                MountControllers base = resolveMountController(mountType);
-                hitBox.mountController(base.modifier()
-                        .canBeDamagedByRider(false)
-                        .build());
-                hitBox.mount(new BukkitEntity(rider));
-                Debugger.send("§a[BetterModel] Mounted " + rider.getName()
-                        + " on pet " + petUUID + " via HitBox (controller: " + base.name() + ")");
-                return true;
-            }
-        }
-
-        // Fallback to vanilla passengers if no HitBox is available
-        Entity petEntity = Bukkit.getEntity(petUUID);
-        if (petEntity == null)
+        if (registry == null || registry.isClosed() || !rider.isValid() || rider.isDead())
             return false;
-        petEntity.addPassenger(rider);
-        Debugger.send("§e[BetterModel] Mounted " + rider.getName()
-                + " on pet " + petUUID + " via vanilla fallback (no HitBox found)");
+
+        HitBox hitBox = findMountableHitBox(registry);
+        if (hitBox == null)
+            return false;
+
+        if (hasMount(petUUID, rider))
+            return true;
+
+        // Leave only the rider's current vehicle. Ejecting the whole vehicle
+        // would unexpectedly dismount unrelated passengers.
+        if (rider.getVehicle() != null)
+            rider.leaveVehicle();
+
+        MountControllers base = resolveMountController(mountType);
+        hitBox.mountController(base.modifier()
+                .canBeDamagedByRider(false)
+                .build());
+        hitBox.mount(new BukkitEntity(rider));
+        Debugger.send("§a[BetterModel] Mounted " + rider.getName()
+                + " on pet " + petUUID + " via HitBox (controller: " + base.name() + ")");
         return true;
     }
 
@@ -105,9 +109,12 @@ public class BetterModelModeler implements AbstractModeler {
     public void dismountAll(UUID petUUID) {
         EntityTrackerRegistry registry = BetterModel.registryOrNull(petUUID);
         if (registry != null && registry.hasPassenger()) {
-            for (EntityTrackerRegistry.MountedHitBox mounted : registry.mountedHitBox().values()) {
-                mounted.dismountAll();
-            }
+            // Dismounting mutates the registry map. Work on a stable, de-duplicated
+            // hitbox snapshot to avoid repeated events and weakly-consistent walks.
+            new HashSet<>(registry.mountedHitBox().values().stream()
+                    .map(EntityTrackerRegistry.MountedHitBox::hitBox)
+                    .toList())
+                    .forEach(HitBox::dismountAll);
             Debugger.send("§a[BetterModel] Dismounted all riders from pet " + petUUID);
             return;
         }
@@ -145,7 +152,13 @@ public class BetterModelModeler implements AbstractModeler {
 
     @Override
     public boolean supportsMount(String mountType) {
-        return mountType != null && !mountType.isEmpty();
+        if (mountType == null)
+            return false;
+
+        return switch (mountType.trim().toLowerCase(Locale.ROOT)) {
+            case "walk", "walking", "fly", "flying" -> true;
+            default -> false;
+        };
     }
 
     @Override
@@ -161,11 +174,11 @@ public class BetterModelModeler implements AbstractModeler {
 
         UUID uuid = pet.getActiveMob().getUniqueId();
         EntityTrackerRegistry registry = BetterModel.registryOrNull(uuid);
-        if (registry == null || !registry.hasPassenger())
+        if (registry == null || registry.isClosed())
             return false;
 
-        String mountType = pet.getMountType();
-        return mountType != null && mountType.toUpperCase().contains("FLY");
+        EntityTrackerRegistry.MountedHitBox mounted = registry.mountedHitBox().get(owner);
+        return mounted != null && mounted.hitBox().mountController().canFly();
     }
 
     @Override
@@ -188,7 +201,7 @@ public class BetterModelModeler implements AbstractModeler {
     private static MountControllers resolveMountController(String mountType) {
         if (mountType == null || mountType.isEmpty())
             return MountControllers.WALK;
-        String upper = mountType.toUpperCase();
+        String upper = mountType.toUpperCase(Locale.ROOT);
         if (upper.contains("FLY"))
             return MountControllers.FLY;
         return MountControllers.WALK;

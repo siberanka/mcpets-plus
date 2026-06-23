@@ -17,6 +17,7 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.Optional;
+import java.util.Locale;
 import java.util.UUID;
 
 public class ModelEngineModeler implements AbstractModeler {
@@ -36,7 +37,7 @@ public class ModelEngineModeler implements AbstractModeler {
         MountControllerType controllerType = (MountControllerType) ModelEngineAPI.getMountControllerTypeRegistry().get(mountType);
 
         if (rider.getVehicle() != null)
-            rider.getVehicle().eject();
+            rider.leaveVehicle();
         if (mountManager.getDriver() != null)
             mountManager.dismountDriver();
 
@@ -164,7 +165,7 @@ public class ModelEngineModeler implements AbstractModeler {
             return false;
 
         String mountType = pet.getMountType();
-        return mountType != null && mountType.toUpperCase().contains("FLY");
+        return mountType != null && mountType.toUpperCase(Locale.ROOT).contains("FLY");
     }
 
     @Override

@@ -19,7 +19,7 @@ import java.util.logging.Logger;
     name        = "MCPets-Velocity",
     version     = "4.1.8",
     description = "Velocity companion for MCPets – syncs active pets across synced servers.",
-    authors     = {"Nocsy"}
+    authors     = {"Nocsy", "siberanka"}
 )
 public class MCPetsVelocity {
 

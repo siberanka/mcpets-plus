@@ -22,14 +22,14 @@ import fr.nocsy.mcpets.data.sql.Databases;
 import fr.nocsy.mcpets.data.sql.PlayerData;
 import fr.nocsy.mcpets.listeners.EventListener;
 import fr.nocsy.mcpets.modeler.AbstractModeler;
-import fr.nocsy.mcpets.modeler.BetterModelModeler;
-import fr.nocsy.mcpets.modeler.ModelEngineModeler;
+import fr.nocsy.mcpets.compat.CraftEngineCompat;
 import fr.nocsy.mcpets.velocity.VelocitySyncManager;
 import io.lumine.mythic.bukkit.MythicBukkit;
 import io.lumine.mythic.core.skills.CustomComponentRegistry;
 import lombok.Getter;
 import net.luckperms.api.LuckPerms;
 import org.bukkit.Bukkit;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -46,12 +46,15 @@ import static fr.nocsy.mcpets.mythicmobs.MythicListener.*;
 
 public class MCPets extends JavaPlugin {
 
+    private boolean startupAborted;
+
     @Getter
     private static MCPets instance;
 
     private static MythicBukkit mythicMobs;
     private static LuckPerms luckPerms;
     private static boolean itemsAdderFound = false;
+    private static boolean craftEngineFound = false;
     private static boolean luckPermsNotFound = false;
     private static boolean nexoFound = false;
     private static boolean nexoChecked = false;
@@ -111,30 +114,22 @@ public class MCPets extends JavaPlugin {
 
         // Reset static flags for PlugMan reload support
         itemsAdderFound = false;
+        craftEngineFound = false;
+        CraftEngineCompat.reset();
         nexoFound = false;
         nexoChecked = false;
         luckPermsNotFound = false;
         modeler = null;
+        startupAborted = false;
 
         if (!checkMythicMobs()) {
             getLog().severe("MCPets could not be loaded : MythicMobs could not be found or this version is not compatible with the plugin.");
             return;
         }
 
-        if (!checkModeler()) {
-            getLog().severe("MCPets could not be loaded : Neither ModelEngine nor BetterModel could be found.");
-            return;
-        }
-
         checkWorldGuard();
         checkLuckPerms();
         checkPlaceholderApi();
-        checkNexo();
-        checkItemsAdder();
-        if (!nexoFound && !itemsAdderFound) {
-            getLog().info("Neither Nexo nor ItemsAdder were found. Custom items features won't be available.");
-        }
-
         try {
             if (GlobalConfig.getInstance().isWorldguardsupport()) {
                 FlagsManager.init(this);
@@ -146,9 +141,29 @@ public class MCPets extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        if (!checkMythicMobs()) {
+            startupAborted = true;
+            getLog().severe("MCPets could not be enabled: MythicMobs is missing, disabled, or API-incompatible.");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
+        if (!initializeModeler()) {
+            startupAborted = true;
+            getLog().severe("MCPets could not be enabled: neither a compatible ModelEngine nor BetterModel installation is enabled.");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
+        checkNexo();
+        checkItemsAdder();
+        checkCraftEngine();
+        if (!nexoFound && !itemsAdderFound && !craftEngineFound) {
+            getLog().info("Neither Nexo, ItemsAdder, nor CraftEngine were found. Custom items features won't be available.");
+        }
+
         CommandHandler.init(this);
         EventListener.init(this);
-        modeler.registerListeners(this);
 
         loadConfigs();
         // PetStats.saveStats() and VelocitySyncManager.init() are scheduled inside
@@ -162,7 +177,7 @@ public class MCPets extends JavaPlugin {
                 .registerCustomComponent(CustomComponentRegistry.MythicComponentType.MECHANIC, MECHANIC_PACKAGE);
 
         getLog().info("-=-=-=-= MCPets loaded =-=-=-=-");
-        getLog().info("      Plugin made by Nocsy     ");
+        getLog().info(" Plugin made by Nocsy & siberanka ");
         getLog().info("-=-=-=-= -=-=-=-=-=-=- =-=-=-=-");
 
         FlagsManager.launchFlags();
@@ -180,6 +195,14 @@ public class MCPets extends JavaPlugin {
 
         if (modeler != null) {
             modeler.unregisterListeners();
+        }
+        CraftEngineCompat.reset();
+
+        // A missing/incompatible model provider is detected before any MCPets
+        // service or persistence task is started. Avoid touching uninitialized
+        // state when Bukkit calls onDisable afterwards.
+        if (startupAborted) {
+            return;
         }
 
         // Run all DB saves on a separate thread to avoid freezing the main thread
@@ -248,15 +271,18 @@ public class MCPets extends JavaPlugin {
         if (nexoChecked) return false;
 
         try {
-            Class.forName("com.nexomc.nexo.api.NexoItems");
+            final Plugin plugin = Bukkit.getPluginManager().getPlugin("Nexo");
+            if (plugin == null || !plugin.isEnabled()) {
+                nexoFound = false;
+                return false;
+            }
+
+            Class.forName("com.nexomc.nexo.api.NexoItems", false, MCPets.class.getClassLoader());
             nexoFound = true;
             if (!nexoChecked) {
                 getLog().info("Nexo found. Nexo Custom items features are available.");
             }
-        } catch (final ClassNotFoundException e) {
-            nexoFound = false;
-        } catch (final Exception e) {
-            // Handle cases like zip file closed during plugin reload
+        } catch (final ClassNotFoundException | LinkageError | RuntimeException e) {
             nexoFound = false;
             if (!nexoChecked) {
                 getLog().warning("Could not check for Nexo (" + e.getClass().getSimpleName() + "). Nexo Custom items features won't be available.");
@@ -269,13 +295,24 @@ public class MCPets extends JavaPlugin {
     }
 
     private static void checkItemsAdder() {
-
         try {
-            Class.forName("dev.lone.itemsadder.api.CustomStack");
+            final Plugin plugin = Bukkit.getPluginManager().getPlugin("ItemsAdder");
+            if (plugin == null || !plugin.isEnabled()) {
+                itemsAdderFound = false;
+                return;
+            }
+
+            Class.forName("dev.lone.itemsadder.api.CustomStack", false, MCPets.class.getClassLoader());
             itemsAdderFound = true;
-        } catch (final ClassNotFoundException e) {
+            getLog().info("ItemsAdder found. ItemsAdder custom items are available.");
+        } catch (final ClassNotFoundException | LinkageError | RuntimeException e) {
             itemsAdderFound = false;
+            getLog().warning("Could not initialize ItemsAdder custom-item support (" + e.getClass().getSimpleName() + ").");
         }
+    }
+
+    private static void checkCraftEngine() {
+        craftEngineFound = CraftEngineCompat.initialize();
     }
 
     /**
@@ -313,29 +350,62 @@ public class MCPets extends JavaPlugin {
     }
 
     /**
-     * Check and initialize the modeler (BetterModel or ModelEngine)
+     * Select and initialize a supported model provider.
+     *
+     * ModelEngine remains the first choice for backwards compatibility on
+     * existing installations. BetterModel is used when ModelEngine is absent,
+     * disabled, or API-incompatible. Provider initialization is intentionally
+     * delayed until onEnable so soft dependencies have completed their own
+     * startup before MCPets subscribes to their event APIs.
      */
-    private static boolean checkModeler() {
-        if (modeler != null)
-            return true;
+    private boolean initializeModeler() {
+        modeler = null;
 
-        // Try BetterModel first
+        return tryModeler(
+                "ModelEngine",
+                "com.ticxo.modelengine.api.ModelEngineAPI",
+                "fr.nocsy.mcpets.modeler.ModelEngineModeler"
+        ) || tryModeler(
+                "BetterModel",
+                "kr.toxicity.model.api.BetterModel",
+                "fr.nocsy.mcpets.modeler.BetterModelModeler"
+        );
+    }
+
+    private boolean tryModeler(final String pluginName,
+                               final String apiClass,
+                               final String implementationClass) {
+        final Plugin dependency = getServer().getPluginManager().getPlugin(pluginName);
+        if (dependency == null || !dependency.isEnabled()) {
+            return false;
+        }
+
+        AbstractModeler candidate = null;
         try {
-            Class.forName("kr.toxicity.model.api.BetterModel");
-            modeler = new BetterModelModeler();
-            getLog().info("BetterModel found. Using BetterModel as modeler.");
+            Class.forName(apiClass, false, getClassLoader());
+            final Class<?> rawImplementation = Class.forName(implementationClass, true, getClassLoader());
+            if (!AbstractModeler.class.isAssignableFrom(rawImplementation)) {
+                throw new IllegalStateException(implementationClass + " does not implement AbstractModeler.");
+            }
+            candidate = (AbstractModeler) rawImplementation.getDeclaredConstructor().newInstance();
+            candidate.registerListeners(this);
+            modeler = candidate;
+            getLog().info(pluginName + " found and initialized. Using it as the model provider.");
             return true;
-        } catch (final ClassNotFoundException ignored) {}
+        } catch (final ReflectiveOperationException | LinkageError | RuntimeException error) {
+            if (candidate != null) {
+                try {
+                    candidate.unregisterListeners();
+                } catch (final LinkageError | RuntimeException cleanupError) {
+                    error.addSuppressed(cleanupError);
+                }
+            }
 
-        // Fallback to ModelEngine
-        try {
-            Class.forName("com.ticxo.modelengine.api.ModelEngineAPI");
-            modeler = new ModelEngineModeler();
-            getLog().info("ModelEngine found. Using ModelEngine as modeler.");
-            return true;
-        } catch (final ClassNotFoundException ignored) {}
-
-        return false;
+            getLog().log(Level.SEVERE,
+                    pluginName + " is enabled but its API is incompatible or failed to initialize. Trying the next model provider.",
+                    error);
+            return false;
+        }
     }
 
     private static boolean checkPlaceholderApi() {
@@ -377,6 +447,33 @@ public class MCPets extends JavaPlugin {
      */
     public static boolean isItemsAdderLoaded() {
         return itemsAdderFound;
+    }
+
+    public static boolean isCraftEngineLoaded() {
+        return craftEngineFound;
+    }
+
+    /**
+     * Refresh pet definitions after an external item provider finishes loading.
+     * CraftEngine intentionally populates its item registry after plugin enable,
+     * so reading CraftEngine-backed icons before its reload event would produce
+     * temporary vanilla fallbacks.
+     */
+    public static void refreshCustomItemDefinitions() {
+        final MCPets plugin = getInstance();
+        if (plugin == null || !plugin.isEnabled() || plugin.startupAborted) {
+            return;
+        }
+
+        try {
+            PetConfig.loadPets(AbstractConfig.getPath() + "Pets/", true);
+            for (final EditorItems item : EditorItems.values()) {
+                item.refreshData();
+            }
+            getLog().info("Pet definitions refreshed after CraftEngine loaded its custom items.");
+        } catch (final RuntimeException | LinkageError error) {
+            getLog().log(Level.SEVERE, "Could not refresh pet definitions after CraftEngine reload.", error);
+        }
     }
 
     public static Logger getLog() {

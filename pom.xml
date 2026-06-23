@@ -27,8 +27,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.15.0</version>
                 <configuration>
-                    <source>21</source>
-                    <target>21</target>
+                    <release>${maven.compiler.release}</release>
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.projectlombok</groupId>
@@ -47,9 +46,11 @@
         </resources>
     </build>
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Compile against the oldest BetterModel API version MCPets supports.
+             Override with -Dbettermodel.version=... to verify newer releases. -->
+        <bettermodel.version>2.2.0</bettermodel.version>
     </properties>
     <repositories>
         <repository>
@@ -163,7 +164,7 @@
         <dependency>
             <groupId>io.github.toxicity188</groupId>
             <artifactId>bettermodel-bukkit-api</artifactId>
-            <version>2.2.0</version>
+            <version>${bettermodel.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>

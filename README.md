@@ -11,9 +11,9 @@ Looking for help ? Join the [Discord](https://discord.com/invite/p7QTm2gUyf) !
 
 <img src="https://i.imgur.com/KadwjCO.png" alt="Features">
 
-⭕ **3D modeled pets** with ANY behavior, skills, effects and more based on MythicMobs and ModelEngine
+⭕ **3D modeled pets** with ANY behavior, skills, effects and more based on MythicMobs and either ModelEngine or BetterModel
 
-⭕ Create **mounts** using ModelEngine and implement them easily with MCPets
+⭕ Create **mounts** using ModelEngine or BetterModel and implement them easily with MCPets
 
 ⭕ Unique **inventory** per pet
 
@@ -22,6 +22,8 @@ Looking for help ? Join the [Discord](https://discord.com/invite/p7QTm2gUyf) !
 ⭕ **Taming**, **evolutions** and **pet food** system with MCPets 3.0.0
 
 ⭕ Customizable **in-game GUI interface** : summon pets, show their stats, custom names, mount, skins, inventory... Organizable in categories
+
+⭕ Custom item icons from **ItemsAdder, Nexo, or CraftEngine**
 
 ⭕ **Give orders** to your pets using the Signal Stick
 
@@ -34,6 +36,9 @@ Looking for help ? Join the [Discord](https://discord.com/invite/p7QTm2gUyf) !
 ⭕ **Velocity cross-server pet sync** — active pets follow players seamlessly between servers on a Velocity network *(see [mcpets-velocity/README.md](mcpets-velocity/README.md))*
 
 ✨ Need a demo pet to start with ? Check out [Sleepy the Otter](https://mcmodels.net/products/11051/sleepy-the-otter) !
+
+For CraftEngine-backed pet icons, signal sticks, or skin icons, set the item section's
+`CraftEngineId` to a namespaced item id, for example `my_pack:pet_icon`.
 
 ---
 

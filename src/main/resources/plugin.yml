@@ -2,7 +2,9 @@ name: '${project.name}'
 version: '${project.version}'
 description: MCModels affiliate plugin. Join the workshop! https://discord.gg/p7QTm2gUyf
 load: POSTWORLD
-author: Nocsy
+authors:
+  - Nocsy
+  - siberanka
 website: 'https://mcpets.gitbook.io/mcpets'
 
 main: fr.nocsy.mcpets.MCPets
@@ -14,6 +16,7 @@ depend:
 softdepend:
   - ModelEngine
   - BetterModel
+  - CraftEngine
   - Nexo
   - WorldGuard
   - LuckPerms

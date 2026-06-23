@@ -3,6 +3,6 @@
   "name": "MCPets-Velocity",
   "version": "${project.version}",
   "description": "Velocity companion for MCPets – syncs active pets across synced servers.",
-  "authors": ["Nocsy"],
+  "authors": ["Nocsy", "siberanka"],
   "main": "fr.nocsy.mcpets.velocity.MCPetsVelocity"
 }
